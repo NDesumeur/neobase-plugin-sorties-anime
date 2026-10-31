@@ -1,0 +1,20 @@
+{
+  "id": "neobase.sortiesanime",
+  "name": "Sorties anime",
+  "version": "1.0.0",
+  "author": "NDesumeur",
+  "description": "Toutes les sorties d'animes, jour par jour, pas seulement les tiennes : suis ceux que tu veux et ajoute leurs sorties à ton emploi du temps, remises à jour automatiquement.",
+  "icon": "icon.png",
+  "entry": "index.js",
+  "view": "sortiesanime",
+  "neobase": ">=4.0.0",
+  "type": "app",
+  "category": "Anime",
+  "mobile": false,
+  "system": false,
+  "dependencies": {},
+  "permissions": [
+    "full"
+  ],
+  "autoload": true
+}
