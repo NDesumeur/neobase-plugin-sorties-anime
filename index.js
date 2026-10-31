@@ -32,7 +32,7 @@ const openFranime = a => {
   window.neo ? newTab(url) : api('open', {target: url}).catch(e => toast(e.message, true));
 };
 const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]/g, '');
-const AQ = 'id format status siteUrl title{romaji english} nextAiringEpisode{episode airingAt} startDate{year month}';
+const AQ = 'id format status siteUrl title{romaji english} nextAiringEpisode{episode airingAt} startDate{year month} coverImage{medium}';
 
 // From the AniList search results for one watched anime, keep the entries of that franchise that are airing or announced
 function pickReleases(w, media) {
@@ -44,7 +44,7 @@ function pickReleases(w, media) {
     for (const x of [m, ...m.relations.edges.filter(e => e.relationType === 'SEQUEL').map(e => e.node)])
       if (live(x) && !seen.has(x.id)) {
         seen.add(x.id);
-        out.push({slug: w.slug, title: x.title.english || x.title.romaji, status: x.status, next: x.nextAiringEpisode, start: x.startDate, url: x.siteUrl});
+        out.push({slug: w.slug, title: x.title.english || x.title.romaji, status: x.status, next: x.nextAiringEpisode, cover: x.coverImage?.medium, start: x.startDate, url: x.siteUrl});
       }
   return out;
 }
@@ -91,58 +91,55 @@ async function refreshAnime(force) {
   finally { animeBusy = false; saveAnime(); animeAfter(); }
 }
 
+function animeUnfollow(slug) {  // ne plus suivre : retiré pour de bon, l'historique FRAnime ne le ramène pas
+  const w = anime.watched[slug]; if (!w) return;
+  anime.ignored = anime.ignored.filter(s => s !== slug); delete anime.watched[slug]; if (!anime.deleted.includes(slug)) anime.deleted.push(slug);
+  if (anime.cache) anime.cache.items = anime.cache.items.filter(a => a.slug !== slug);
+  saveAnime(); toast('« ' + w.title + ' » : tu ne le suis plus'); animeAfter();
+}
 function renderAnime() {
   const list = $('anList'), now = Date.now() / 1000, all = Object.values(anime.watched);
   const items = animeReleases().sort((a, b) => (a.next?.airingAt ?? 9e12) - (b.next?.airingAt ?? 9e12));
   const ago = anime.cache ? Math.round((Date.now() - anime.cache.at) / 60000) : null;
   $('anInfo').textContent = all.length + ' animes suivis · ' + (animeBusy ? 'mise à jour… ' + animeProgress : ago === null ? 'jamais mis à jour' : ago < 1 ? "mis à jour à l'instant" : 'mis à jour ' + until(-ago * 60000).replace('en retard de', 'il y a'));
   $('anRefresh').disabled = animeBusy;
-  list.innerHTML = '';
-  const row = a => {
-    const r = el('div', 'titem'), x = el('button', 'x', 'X'), w = anime.watched[a.slug];
+  list.replaceChildren();
+  const card = a => {
+    const c = el('div', 'anCard'), w = anime.watched[a.slug], img = el('img', 'anPoster'), body = el('div', 'anBody'), meta = el('div', 'anMeta'), acts = el('div', 'anActs');
+    img.src = a.cover || ''; img.alt = ''; img.loading = 'lazy'; img.onerror = () => img.classList.add('none'); if (!a.cover) img.classList.add('none');
     let when, badge;
-    if (a.next) {
-      const ms = (a.next.airingAt - now) * 1000;
-      when = 'ÉP. ' + a.next.episode; badge = ms <= 0 ? el('span', 'badge now', 'sorti') : el('span', 'badge' + (ms < 86400000 ? ' soon' : ''), until(ms));
-    } else {
-      when = a.status === 'NOT_YET_RELEASED' ? 'BIENTÔT' : 'EN COURS';
-      badge = el('span', 'badge', a.start?.year ? (a.start.month ? MONTHS[a.start.month - 1] + ' ' : '') + a.start.year : 'date inconnue');
-    }
-    r.title = (w?.imported ? (w.franime ? 'Dans ta liste FRAnime' : 'Importé de ta liste') :'Vu sur FRAnime : saison ' + w?.season + ', ép. ' + w?.ep) + '. Clic : ouvrir';
-    x.title = 'Masquer cet anime';
-    x.onclick = e => { e.stopPropagation(); anime.ignored.push(a.slug); saveAnime(); animeAfter(); };
-    r.append(el('span', 'tt', when), el('span', 'tn', a.title), badge, x);
-    r.onclick = () => openFranime(a);
-    return r;
+    if (a.next) { const ms = (a.next.airingAt - now) * 1000; when = 'ÉPISODE ' + a.next.episode; badge = ms <= 0 ? el('span', 'badge now', 'sorti') : el('span', 'badge' + (ms < 86400000 ? ' soon' : ''), until(ms)); }
+    else { when = a.status === 'NOT_YET_RELEASED' ? 'BIENTÔT' : 'EN COURS'; badge = el('span', 'badge', a.start?.year ? (a.start.month ? MONTHS[a.start.month - 1] + ' ' : '') + a.start.year : 'date inconnue'); }
+    meta.append(el('span', 'anEp', when), badge);
+    const open = el('button', 'btn main px', 'OUVRIR'), hide = el('button', 'btn ghost px', 'MASQUER'), stop = el('button', 'btn ghost px', 'NE PLUS SUIVRE');
+    open.onclick = () => openFranime(a); hide.title = 'Le cacher de cette liste sans l\'oublier';
+    hide.onclick = () => { anime.ignored.push(a.slug); saveAnime(); animeAfter(); };
+    stop.onclick = async () => { if (await nbConfirm('Ne plus suivre « ' + a.title + ' » ?')) animeUnfollow(a.slug); };
+    acts.append(open, hide, stop);
+    body.append(el('b', 'anTitle', a.title), meta, el('small', 'anSrc', w?.imported ? (w.franime ? 'Dans ta liste FRAnime' : 'Ajouté par toi') : 'Vu sur FRAnime · saison ' + w?.season + ' · ép. ' + w?.ep), acts);
+    c.append(img, body); return c;
   };
   const week = items.filter(a => a.next && a.next.airingAt - now < 7 * 86400), later = items.filter(a => !week.includes(a));
-  // foldable groups, remembered on this PC; "later" starts folded because it is long
   const folded = k => { try { const v = localStorage.getItem('fold-' + k); return v ? v === '1' : k === 'later'; } catch { return k === 'later'; } };
   const group = (k, label, arr) => {
     if (!arr.length) return;
-    const f = folded(k), h = el('button', 'group', (f ? '▸ ' : '▾ ') + label + ' (' + arr.length + ')');
+    const f = folded(k), h = el('button', 'anSec', (f ? '▸ ' : '▾ ') + label + ' (' + arr.length + ')');
     h.onclick = () => { try { localStorage.setItem('fold-' + k, f ? '0' : '1'); } catch {} renderAnime(); };
     list.append(h);
-    if (!f) arr.forEach(a => list.append(row(a)));
+    if (!f) { const g = el('div', 'anGrid'); g.append(...arr.map(card)); list.append(g); }
   };
   group('week', 'CETTE SEMAINE', week);
   group('later', 'PLUS TARD ET ANNONCÉS', later);
-  if (!items.length) list.append(el('div', 'hint', animeBusy ? 'Recherche des sorties…' : 'Aucune sortie prévue pour tes animes.'));
+  if (!items.length) list.append(el('div', 'hint', animeBusy ? 'Recherche des sorties…' : 'Aucune sortie prévue pour tes animes. Suis-en depuis « Jour par jour » avec « + SUIVRE », ou importe une liste.'));
   if (anime.ignored.length) {
-    const tg = el('button', '', (showHidden ? '▾ ' : '▸ ') + 'MASQUÉS (' + anime.ignored.length + ')'); tg.id = 'anHidden';
+    const tg = el('button', 'anSec', (showHidden ? '▾ ' : '▸ ') + 'MASQUÉS (' + anime.ignored.length + ')'); tg.id = 'anHidden';
     tg.onclick = () => { showHidden = !showHidden; renderAnime(); };
     list.append(tg);
     if (showHidden) anime.ignored.forEach(slug => {
       const r = el('div', 'titem'), b = el('button', 'btn ghost px', 'Réafficher'), del = el('button', 'btn del px', 'Supprimer');
       b.onclick = () => { anime.ignored = anime.ignored.filter(s => s !== slug); saveAnime(); animeAfter(); };
-      del.onclick = async () => {
-        if (!await nbConfirm('Supprimer définitivement « ' + (anime.watched[slug]?.title || slug) + ' » de tes animes suivis ?')) return;
-        anime.ignored = anime.ignored.filter(s => s !== slug); delete anime.watched[slug]; anime.deleted.push(slug);
-        if (anime.cache) anime.cache.items = anime.cache.items.filter(a => a.slug !== slug);
-        saveAnime(); animeAfter();
-      };
-      r.append(el('span', 'tn', anime.watched[slug]?.title || slug), b, del);
-      list.append(r);
+      del.onclick = async () => { if (await nbConfirm('Supprimer définitivement « ' + (anime.watched[slug]?.title || slug) + ' » de tes animes suivis ?')) animeUnfollow(slug); };
+      r.append(el('span', 'tn', anime.watched[slug]?.title || slug), b, del); list.append(r);
     });
   }
 }
@@ -212,6 +209,7 @@ async function loadDay(d) {  // toutes les sorties de ce jour (hors contenu adul
   dayCache.set(key, {at: Date.now(), items}); return items;
 }
 const mediaTitle = m => m.title.english || m.title.romaji;
+const followSlug = m => { const keys = new Set([norm(m.title.english), norm(m.title.romaji)]); return Object.values(anime.watched).find(w => w.slug === 'al-' + m.id || keys.has(norm(w.title)))?.slug || null; };
 const followed = m => { const k = new Set(Object.values(anime.watched).filter(w => !anime.ignored.includes(w.slug)).map(w => norm(w.title))); return !!anime.watched['al-' + m.id] || k.has(norm(m.title.english)) || k.has(norm(m.title.romaji)); };
 async function renderDay() {
   const box = $('anDayList'), key = ymd(anDay), today = ymd(new Date());
@@ -222,14 +220,14 @@ async function renderDay() {
   const mine = $('anMine').checked; let list = items.filter(s => !mine || followed(s.media));
   if ($('anSort').value === 'pop') list = list.slice().sort((a, b) => (b.media.popularity || 0) - (a.media.popularity || 0));
   box.replaceChildren(...(list.length ? list.map(s => {
-    const m = s.media, r = el('div', 'titem'), t = new Date(s.airingAt * 1000), img = el('img', 'anCover'), fol = followed(m), b = el('button', 'btn ' + (fol ? 'ghost' : 'main') + ' px', fol ? '✓ SUIVI' : '+ SUIVRE');
+    const m = s.media, r = el('div', 'titem'), t = new Date(s.airingAt * 1000), img = el('img', 'anCover'), fol = followed(m), b = el('button', 'btn ' + (fol ? 'ghost' : 'main') + ' px', fol ? '✓ SUIVI' : '+ SUIVRE'); if (fol) b.title = 'Clique pour ne plus le suivre';
     img.src = m.coverImage?.medium || ''; img.alt = ''; img.loading = 'lazy';
-    b.onclick = e => { e.stopPropagation(); if (fol) return; const slug = 'al-' + m.id; anime.deleted = anime.deleted.filter(x => x !== slug); anime.watched[slug] = {slug, title: mediaTitle(m), season: 1, ep: 0, last: Date.now(), imported: true, franime: false}; saveAnime(); toast('« ' + mediaTitle(m) + ' » ajouté à tes animes'); refreshAnime(true); renderDay(); };
+    b.onclick = e => { e.stopPropagation(); if (fol) { const slug = followSlug(m); if (slug) animeUnfollow(slug); return; } const slug = 'al-' + m.id; anime.deleted = anime.deleted.filter(x => x !== slug); anime.watched[slug] = {slug, title: mediaTitle(m), season: 1, ep: 0, last: Date.now(), imported: true, franime: false}; saveAnime(); toast('« ' + mediaTitle(m) + ' » ajouté à tes animes'); refreshAnime(true); renderDay(); };
     r.append(el('span', 'tt', toHM(t.getHours() * 60 + t.getMinutes())), img, el('span', 'tn', mediaTitle(m) + ' · ép. ' + s.episode), el('span', 'badge' + (t < new Date() ? ' now' : ''), t < new Date() ? 'sorti' : until(t - Date.now())), b);
     r.onclick = () => newTab(m.siteUrl); return r;
   }) : [el('div', 'hint', mine ? 'Aucun de tes animes ne sort ce jour-là.' : 'Aucune sortie ce jour-là.')]));
 }
-host.addStyle('.anNav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px} .anNav b{font:12px var(--title);color:var(--lilac);margin:0 8px;text-transform:capitalize} .anNav select{width:auto;min-width:200px} .anCheck{display:flex;gap:8px;align-items:center;color:var(--shell);font-size:14px;margin:6px 0} .anCover{width:34px;height:48px;object-fit:cover;margin:0 8px;flex:none}');
+host.addStyle('.anGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px} .anCard{display:grid;grid-template-columns:80px 1fr;gap:12px;padding:10px;background:color-mix(in srgb,var(--line) 30%,var(--bg0));box-shadow:inset 0 0 0 2px var(--line2)} .anCard:hover{box-shadow:inset 0 0 0 2px var(--magenta)} .anPoster{width:80px;height:114px;object-fit:cover;background:#1a0a2e} .anPoster.none{visibility:hidden} .anBody{display:flex;flex-direction:column;gap:6px;min-width:0} .anTitle{font:12px var(--title);color:#fff;word-break:break-word} .anMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .anEp{font:9px var(--title);color:var(--lilac)} .anSrc{color:var(--muted);font-size:12px} .anActs{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto} .anActs .btn{height:32px;padding:0 10px;font:9px var(--title)} .anSec{all:unset;display:block;cursor:var(--cp,pointer);font:9px var(--title);letter-spacing:1.5px;color:var(--muted);margin:18px 0 8px} .anSec:hover{color:#fff} #anInfo{font-size:14px;color:var(--muted)} #imModal{position:fixed;inset:0;z-index:40;display:none;place-items:center;background:rgba(var(--d5),.72);backdrop-filter:blur(3px)} #imModal.on{display:grid} #imText{height:240px;resize:vertical;font-size:16px;line-height:1.4} .anNav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px} .anNav b{font:12px var(--title);color:var(--lilac);margin:0 8px;text-transform:capitalize} .anNav select{width:auto;min-width:200px} .anCheck{display:flex;gap:8px;align-items:center;color:var(--shell);font-size:14px;margin:6px 0} .anCover{width:34px;height:48px;object-fit:cover;margin:0 8px;flex:none}');
 const anTabs = () => $('anTabs').replaceChildren(...[['day', 'Jour par jour'], ['mine', 'Mes animes']].map(([k, l]) => { const b = el('button', 'tab px' + (anView === k ? ' on' : ''), l); b.onclick = () => { anView = k; anTabs(); $('anDayBox').style.display = k === 'day' ? '' : 'none'; $('anMineBox').style.display = k === 'mine' ? '' : 'none'; if (k === 'day') renderDay(); }; return b; }));
 anTabs(); $('anMineBox').style.display = 'none';
 $('anPrev').onclick = () => { anDay = new Date(anDay.getFullYear(), anDay.getMonth(), anDay.getDate() - 1); renderDay(); };
