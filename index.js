@@ -23,7 +23,7 @@ export default async function (ctx) {
     return v;
   };
   // ---- ton code d'origine ----
-let anime = {watched: {}, ignored: [], deleted: [], cache: null}, animeBusy = false, showHidden = false, animeProgress = '';
+let animeLoaded = false, anime = {watched: {}, ignored: [], deleted: [], cache: null}, animeBusy = false, showHidden = false, animeProgress = '';
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const saveAnime = () => api('anime', anime).catch(e => toast('Sauvegarde impossible : ' + e.message, true));
 const animeReleases = () => (anime.cache?.items || []).filter(a => !anime.ignored.includes(a.slug));
@@ -44,7 +44,7 @@ function pickReleases(w, media) {
     for (const x of [m, ...m.relations.edges.filter(e => e.relationType === 'SEQUEL').map(e => e.node)])
       if (live(x) && !seen.has(x.id)) {
         seen.add(x.id);
-        out.push({slug: w.slug, title: x.title.english || x.title.romaji, status: x.status, next: x.nextAiringEpisode, cover: x.coverImage?.medium, start: x.startDate, url: x.siteUrl});
+        out.push({slug: w.slug, title: x.title.english || x.title.romaji, status: x.status, next: x.nextAiringEpisode, mid: x.id, cover: x.coverImage?.medium, start: x.startDate, url: x.siteUrl});
       }
   return out;
 }
@@ -172,7 +172,7 @@ $('imOk').onclick = () => {
 };
 $('imCopy').onclick = () => navigator.clipboard.writeText($('imCmd').value).then(() => toast('Commande copiée'), () => { $('imCmd').select(); toast('Fais Ctrl+C pour copier', true); });
 $('anRefresh').onclick = () => refreshAnime(true);
-api('anime').then(d => { anime = {watched: {}, ignored: [], deleted: [], cache: null, ...d}; animeAfter(); refreshAnime(); }).catch(e => toast('Sorties anime indisponibles : ' + e.message, true));
+api('anime').then(d => { anime = {watched: {}, ignored: [], deleted: [], cache: null, ...d}; animeLoaded = true; animeAfter(); refreshAnime(); }).catch(e => toast('Sorties anime indisponibles : ' + e.message, true));
 const anTimer = setInterval(refreshAnime, 15 * 60000);  // (arrêté quand le plugin est déchargé)
 
 // ---- nouveautés : toutes les sorties, jour par jour, et le calendrier ----
@@ -180,13 +180,36 @@ const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.get
 const toHM = mn => pad(Math.floor(mn / 60)) + ':' + pad(mn % 60);
 let anView = 'day', anDay = new Date(), anBusy = false;
 const dayCache = new Map();
-function syncCalendar() {  // les sorties de tes animes dans ton emploi du temps, remises à jour à chaque recherche
-  const on = anime.calendar !== false;
-  const evs = on ? animeReleases().filter(a => a.next && a.next.airingAt * 1000 < Date.now() + 90 * 864e5).map(a => {
-    const d = new Date(a.next.airingAt * 1000), s = d.getHours() * 60 + d.getMinutes();
-    return {id: 'anime:' + a.slug + ':' + a.next.episode, kind: 'event', title: a.title + ' · ép. ' + a.next.episode, date: ymd(d), start: toHM(s), end: toHM(Math.min(1439, s + 25)), allDay: false, color: '#3fb8c8', place: 'Sortie anime'};
-  }) : [];
-  host.agenda?.sync('anime', evs);
+// les épisodes à venir de tes animes (AniList donne le calendrier de plusieurs semaines) : relu au plus une fois par heure
+async function loadUpcoming() {
+  const mids = [...new Set(animeReleases().map(a => a.mid).filter(Boolean))];
+  if (!mids.length) return [];
+  if (anime.upcoming && Date.now() - anime.upcoming.at < 3600000 && anime.upcoming.mids === mids.join(',')) return anime.upcoming.items;
+  const now = Math.floor(Date.now() / 1000), items = [];
+  for (let i = 0; i < mids.length; i += 40) {
+    const chunk = mids.slice(i, i + 40);
+    const data = await aniFetch('query{Page(perPage:50){airingSchedules(mediaId_in:[' + chunk.join(',') + '],airingAt_greater:' + now + ',airingAt_lesser:' + (now + 45 * 86400) + ',sort:TIME){mediaId airingAt episode}}}');
+    items.push(...data.Page.airingSchedules);
+    if (i + 40 < mids.length) await new Promise(ok => setTimeout(ok, 2200));
+  }
+  anime.upcoming = {at: Date.now(), mids: mids.join(','), items}; saveAnime(); return items;
+}
+let calBusy = false;
+async function syncCalendar() {  // les sorties de tes animes dans ton emploi du temps, remises à jour à chaque recherche (et jamais perdues)
+  if (calBusy || !animeLoaded) return; calBusy = true;
+  try {
+    const on = anime.calendar !== false, rel = animeReleases();
+    let evs = [];
+    if (on) {
+      const byMid = new Map(rel.filter(a => a.mid).map(a => [a.mid, a]));
+      let up = []; try { up = await loadUpcoming(); } catch (e) { console.warn(e); }
+      const make = (a, ep, at) => { const d = new Date(at * 1000), s = d.getHours() * 60 + d.getMinutes(); return {id: 'anime:' + a.slug + ':' + ep, kind: 'event', title: a.title + ' · ép. ' + ep, date: ymd(d), start: toHM(s), end: toHM(Math.min(1439, s + 25)), allDay: false, color: '#3fb8c8', place: 'Sortie anime'}; };
+      const seen = new Set();
+      for (const u of up) { const a = byMid.get(u.mediaId); if (!a) continue; const e = make(a, u.episode, u.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }
+      for (const a of rel) if (a.next && a.next.airingAt * 1000 < Date.now() + 45 * 864e5) { const e = make(a, a.next.episode, a.next.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }  // le prochain épisode, même si AniList n'a pas (encore) tout le calendrier
+    }
+    host.agenda?.sync('anime', evs);
+  } finally { calBusy = false; }
 }
 function animeAfter() { renderAnime(); syncCalendar(); if (anView === 'day') renderDay(); }
 const aniFetch = async query => {
@@ -236,8 +259,9 @@ $('anToday').onclick = () => { anDay = new Date(); renderDay(); };
 $('anSort').onchange = $('anMine').onchange = () => renderDay();
 $('anCal').onchange = () => { anime.calendar = $('anCal').checked; saveAnime(); syncCalendar(); toast(anime.calendar ? 'Les sorties de tes animes sont dans ton emploi du temps' : 'Les sorties de tes animes ne sont plus dans ton emploi du temps'); };
   $('anCal').checked = anime.calendar !== false;
-  renderDay(); syncCalendar();
-  host.hooks({ franime: h => { anime.deleted = anime.deleted.filter(s => s !== h.slug); mergeWatched(h); saveAnime(); animeAfter(); } });  // ce que tu regardes sur FRAnime dans NeoBase s'ajoute à ta liste
+  renderDay();
+  const calTimer = setInterval(syncCalendar, 5 * 60000);  // ses événements ne disparaissent pas si l'emploi du temps est remplacé par une synchro
+  host.hooks({ agendaChanged: () => syncCalendar(), franime: h => { anime.deleted = anime.deleted.filter(s => s !== h.slug); mergeWatched(h); saveAnime(); animeAfter(); } });  // ce que tu regardes sur FRAnime dans NeoBase s'ajoute à ta liste
   ctx.onOpen(() => { renderAnime(); renderDay(); });
-  ctx.onClose(() => clearInterval(anTimer));
+  ctx.onClose(() => { clearInterval(anTimer); clearInterval(calTimer); });
 }
