@@ -203,7 +203,7 @@ async function syncCalendar() {  // les sorties de tes animes dans ton emploi du
     if (on) {
       const byMid = new Map(rel.filter(a => a.mid).map(a => [a.mid, a]));
       let up = []; try { up = await loadUpcoming(); } catch (e) { console.warn(e); }
-      const make = (a, ep, at) => { const d = new Date(at * 1000), s = d.getHours() * 60 + d.getMinutes(); return {id: 'anime:' + a.slug + ':' + ep, kind: 'event', title: a.title + ' · ép. ' + ep, date: ymd(d), start: toHM(s), end: toHM(Math.min(1439, s + 25)), allDay: false, color: '#3fb8c8', place: 'Sortie anime'}; };
+      const make = (a, ep, at) => { const d = new Date(at * 1000), s = d.getHours() * 60 + d.getMinutes(); return {id: 'anime:' + a.slug + ':' + ep, kind: 'event', title: a.title + ' · ép. ' + ep, date: ymd(d), start: toHM(s), end: toHM(Math.min(1439, s + 25)), allDay: false, color: '#7ddc3c', place: 'Sortie anime'}; };
       const seen = new Set();
       for (const u of up) { const a = byMid.get(u.mediaId); if (!a) continue; const e = make(a, u.episode, u.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }
       for (const a of rel) if (a.next && a.next.airingAt * 1000 < Date.now() + 45 * 864e5) { const e = make(a, a.next.episode, a.next.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }  // le prochain épisode, même si AniList n'a pas (encore) tout le calendrier

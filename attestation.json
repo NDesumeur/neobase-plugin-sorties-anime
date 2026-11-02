@@ -1,9 +1,0 @@
-{
-  "pluginId": "neobase.sortiesanime",
-  "repo": "NDesumeur/neobase-plugin-sorties-anime",
-  "version": "1.0.2",
-  "sha256": "025ebd3b26f3a15dc9ac3a5f05c3fc521390230508de7c987a2cc9aa991070d5",
-  "approvedAt": "2026-10-31T21:24:00.538Z",
-  "neobase": ">=4.0.0",
-  "signature": "hj3bqrFPt9IwrpAJbhNVV1s7SiuCX7L7A50+ptE0qTZITiaQhvCsLPJFqgpxcrYeAyuAKC3Od6QjPktap1B6Cg=="
-}
