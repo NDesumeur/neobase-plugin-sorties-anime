@@ -16,7 +16,6 @@ export default async function (ctx) {
     return (late ? 'en retard de ' : 'dans ') + s;
   }
   const api = async (n, data) => {  // « anime » vit dans le dossier du plugin (repris une fois de tes données d'avant) ; le reste passe par NeoDex
-    if (n === 'franime') return ctx.neo.pluginMain(ctx.id, 'franime:read');  // l'historique FRAnime, lu par le volet système du plugin (main.js)
     if (n !== 'anime') return Promise.reject(new Error('inconnu : ' + n));
     if (data !== undefined) { await folder.write('anime', data); return true; }
     let v = await doc('anime');
@@ -50,19 +49,10 @@ function pickReleases(w, media) {
   return out;
 }
 
-function mergeWatched(h) {  // h = {slug, title, season, ep, last}: keep the furthest season/episode seen
-  const w = anime.watched[h.slug];
-  if (!w || w.imported) anime.watched[h.slug] = h;
-  else { if (h.season > w.season || (h.season === w.season && h.ep > w.ep)) Object.assign(w, {season: h.season, ep: h.ep}); w.last = Math.max(w.last, h.last); w.title = h.title; }
-}
-
 async function refreshAnime(force) {
   if (animeBusy || (!force && anime.cache && Date.now() - anime.cache.at < 3600000)) return;  // AniList at most once an hour
   animeBusy = true; renderAnime();
   try {
-    for (const h of await api('franime')) {  // merge the history into the permanent list
-      if (!anime.deleted.includes(h.slug)) mergeWatched(h);
-    }
     const watched = Object.values(anime.watched).filter(w => !anime.ignored.includes(w.slug)), items = [], old = anime.cache?.items || [];
     const sleep = s => new Promise(ok => setTimeout(ok, s * 1000));
     let failed = 0;
@@ -92,7 +82,7 @@ async function refreshAnime(force) {
   finally { animeBusy = false; saveAnime(); animeAfter(); }
 }
 
-function animeUnfollow(slug) {  // ne plus suivre : retiré pour de bon, l'historique FRAnime ne le ramène pas
+function animeUnfollow(slug) {  // ne plus suivre : retiré pour de bon
   const w = anime.watched[slug]; if (!w) return;
   anime.ignored = anime.ignored.filter(s => s !== slug); delete anime.watched[slug]; if (!anime.deleted.includes(slug)) anime.deleted.push(slug);
   if (anime.cache) anime.cache.items = anime.cache.items.filter(a => a.slug !== slug);
@@ -205,9 +195,9 @@ async function syncCalendar() {  // les sorties de tes animes dans ton emploi du
       const byMid = new Map(rel.filter(a => a.mid).map(a => [a.mid, a]));
       let up = []; try { up = await loadUpcoming(); } catch (e) { console.warn(e); }
       const make = (a, ep, at) => { const d = new Date(at * 1000), s = d.getHours() * 60 + d.getMinutes(); return {id: 'anime:' + a.slug + ':' + ep, kind: 'event', title: a.title + ' · ép. ' + ep, date: ymd(d), start: toHM(s), end: toHM(Math.min(1439, s + 25)), allDay: false, color: '#7ddc3c', place: 'Sortie anime'}; };
-      const seen = new Set();
-      for (const u of up) { const a = byMid.get(u.mediaId); if (!a) continue; const e = make(a, u.episode, u.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }
-      for (const a of rel) if (a.next && a.next.airingAt * 1000 < Date.now() + 45 * 864e5) { const e = make(a, a.next.episode, a.next.airingAt); if (!seen.has(e.id)) { seen.add(e.id); evs.push(e); } }  // le prochain épisode, même si AniList n'a pas (encore) tout le calendrier
+      const seen = new Set();  // un même anime suivi deux fois (nom FRAnime et « + SUIVRE ») : une seule sortie, d’après son identifiant AniList
+      for (const u of up) { const a = byMid.get(u.mediaId); if (!a) continue; const e = make(a, u.episode, u.airingAt), k = a.mid + ":" + u.episode; if (!seen.has(k)) { seen.add(k); evs.push(e); } }
+      for (const a of rel) if (a.next && a.next.airingAt * 1000 < Date.now() + 45 * 864e5) { const e = make(a, a.next.episode, a.next.airingAt), k = (a.mid || a.slug) + ":" + a.next.episode; if (!seen.has(k)) { seen.add(k); evs.push(e); } }  // le prochain épisode, même si AniList n'a pas (encore) tout le calendrier
     }
     host.agenda?.sync('anime', evs);
   } finally { calBusy = false; }
@@ -261,13 +251,8 @@ $('anSort').onchange = $('anMine').onchange = () => renderDay();
 $('anCal').onchange = () => { anime.calendar = $('anCal').checked; saveAnime(); syncCalendar(); toast(anime.calendar ? 'Les sorties de tes animes sont dans ton emploi du temps' : 'Les sorties de tes animes ne sont plus dans ton emploi du temps'); };
   $('anCal').checked = anime.calendar !== false;
   renderDay();
-  async function pullHistory() {  // ce que tu regardes sur FRAnime (dans NeoDex ou ton navigateur) s'ajoute à ta liste, sans attendre l'actualisation d'AniList
-    if (!animeLoaded) return; const before = JSON.stringify(anime.watched);
-    for (const h of await api('franime').catch(() => [])) if (!anime.deleted.includes(h.slug)) mergeWatched(h);
-    if (JSON.stringify(anime.watched) !== before) { saveAnime(); animeAfter(); }
-  }
-  const calTimer = setInterval(() => { syncCalendar(); pullHistory(); }, 5 * 60000);  // ses événements ne disparaissent pas si l'emploi du temps est remplacé par une synchro
+  const calTimer = setInterval(syncCalendar, 5 * 60000);  // ses événements ne disparaissent pas si l'emploi du temps est remplacé par une synchro
   host.hooks({ agendaChanged: () => syncCalendar() });
-  ctx.onOpen(() => { renderAnime(); renderDay(); pullHistory(); });
+  ctx.onOpen(() => { renderAnime(); renderDay(); });
   ctx.onClose(() => { clearInterval(anTimer); clearInterval(calTimer); });
 }

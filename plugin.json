@@ -14,13 +14,11 @@
   "system": false,
   "dependencies": {},
   "autoload": true,
-  "main": "main.js",
   "sdk": "2.1.0",
   "permissions": [
     "storage",
     "agenda",
     "background",
-    "system:main",
     "network:graphql.anilist.co",
     "network:s4.anilist.co"
   ]
