@@ -16,7 +16,7 @@ export default async function (ctx) {
     return (late ? 'en retard de ' : 'dans ') + s;
   }
   const api = async (n, data) => {  // « anime » vit dans le dossier du plugin (repris une fois de tes données d'avant) ; le reste passe par NeoBase
-    if (n !== 'anime') return ctx.api(n, data);
+    if (n !== 'anime') return data === undefined ? ctx.legacy.api(n) : Promise.reject(new Error('lecture seule'));  // l'historique FRAnime de NeoBase, en lecture
     if (data !== undefined) { await folder.write('anime', data); return true; }
     let v = await doc('anime');
     if (v == null && legacy.api) { v = await legacy.api('anime').catch(() => null); if (v != null) await folder.write('anime', v); }  // première ouverture : tu retrouves tes animes suivis
