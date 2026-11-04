@@ -19,6 +19,7 @@
     "storage",
     "agenda",
     "background",
+    "notifications",
     "network:graphql.anilist.co",
     "network:s4.anilist.co"
   ]
