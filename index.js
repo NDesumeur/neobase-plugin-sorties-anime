@@ -16,7 +16,8 @@ export default async function (ctx) {
     return (late ? 'en retard de ' : 'dans ') + s;
   }
   const api = async (n, data) => {  // « anime » vit dans le dossier du plugin (repris une fois de tes données d'avant) ; le reste passe par NeoDex
-    if (n !== 'anime') return data === undefined ? ctx.legacy.api(n) : Promise.reject(new Error('lecture seule'));  // l'historique FRAnime de NeoDex, en lecture
+    if (n === 'franime') return ctx.neo.pluginMain(ctx.id, 'franime:read');  // l'historique FRAnime, lu par le volet système du plugin (main.js)
+    if (n !== 'anime') return Promise.reject(new Error('inconnu : ' + n));
     if (data !== undefined) { await folder.write('anime', data); return true; }
     let v = await doc('anime');
     if (v == null && legacy.api) { v = await legacy.api('anime').catch(() => null); if (v != null) await folder.write('anime', v); }  // première ouverture : tu retrouves tes animes suivis
@@ -260,8 +261,13 @@ $('anSort').onchange = $('anMine').onchange = () => renderDay();
 $('anCal').onchange = () => { anime.calendar = $('anCal').checked; saveAnime(); syncCalendar(); toast(anime.calendar ? 'Les sorties de tes animes sont dans ton emploi du temps' : 'Les sorties de tes animes ne sont plus dans ton emploi du temps'); };
   $('anCal').checked = anime.calendar !== false;
   renderDay();
-  const calTimer = setInterval(syncCalendar, 5 * 60000);  // ses événements ne disparaissent pas si l'emploi du temps est remplacé par une synchro
-  host.hooks({ agendaChanged: () => syncCalendar(), franime: h => { anime.deleted = anime.deleted.filter(s => s !== h.slug); mergeWatched(h); saveAnime(); animeAfter(); } });  // ce que tu regardes sur FRAnime dans NeoDex s'ajoute à ta liste
-  ctx.onOpen(() => { renderAnime(); renderDay(); });
+  async function pullHistory() {  // ce que tu regardes sur FRAnime (dans NeoDex ou ton navigateur) s'ajoute à ta liste, sans attendre l'actualisation d'AniList
+    if (!animeLoaded) return; const before = JSON.stringify(anime.watched);
+    for (const h of await api('franime').catch(() => [])) if (!anime.deleted.includes(h.slug)) mergeWatched(h);
+    if (JSON.stringify(anime.watched) !== before) { saveAnime(); animeAfter(); }
+  }
+  const calTimer = setInterval(() => { syncCalendar(); pullHistory(); }, 5 * 60000);  // ses événements ne disparaissent pas si l'emploi du temps est remplacé par une synchro
+  host.hooks({ agendaChanged: () => syncCalendar() });
+  ctx.onOpen(() => { renderAnime(); renderDay(); pullHistory(); });
   ctx.onClose(() => { clearInterval(anTimer); clearInterval(calTimer); });
 }
