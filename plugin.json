@@ -10,6 +10,8 @@
   "neobase": ">=4.0.0",
   "type": "app",
   "category": "Anime",
+  "syncMode": "fusion",
+  "syncInfo": "Animes suivis, couleur dans l'agenda.",
   "mobile": false,
   "system": false,
   "dependencies": {},
